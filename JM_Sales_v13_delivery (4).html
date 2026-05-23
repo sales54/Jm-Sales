@@ -4628,17 +4628,24 @@ function _esc(v) {
     .replace(/'/g,'&#39;');
 }
 
-// ── The shareable link is now a data:text/html URI ───────────────
-// This works on ANY device — phone, tablet, PC — with no server.
+// ── GitHub Pages hosted URL ───────────────────────────────────────
+// Now that the file is hosted at GitHub Pages, we use a real https:// link.
+// Safe delivery data is base64-encoded in the &d= param so it works
+// even if the Google Sheet is not connected on the delivery person's device.
+const GITHUB_PAGES_BASE = 'https://sales54.github.io/Jm-Sales/JM_Sales_v13_delivery.html';
+
 function generateDeliveryLink(sale) {
   try {
-    const html = generateStandaloneDeliveryHtml(sale);
-    // data: URIs have a browser limit ~2MB; our page is well under that
-    const encoded = encodeURIComponent(html);
-    return 'data:text/html,' + encoded;
+    const safe = _safeDeliveryPayload(sale);
+    const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(safe))));
+    return GITHUB_PAGES_BASE +
+      '?delivery=1' +
+      '&id=' + encodeURIComponent(String(sale.id)) +
+      '&d=' + encoded;
   } catch(e) {
     console.error('[DeliveryLink] generation error:', e);
-    return '';
+    // Fallback: just id, will try to fetch from sheet
+    return GITHUB_PAGES_BASE + '?delivery=1&id=' + encodeURIComponent(String(sale.id));
   }
 }
 
@@ -4653,36 +4660,29 @@ function openDeliveryShareModal(id) {
   if (!s) { showToast('Sale not found.', true); return; }
   _deliverySharingSale = s;
 
-  // Show generating state
-  const linkBox  = document.getElementById('deliveryShareLinkText');
-  const noteEl   = document.getElementById('deliveryShareNote');
-  const actionsEl = document.getElementById('deliveryShareActions');
-  linkBox.textContent = 'Generating link…';
-  document.getElementById('deliveryShareCustomer').textContent = (s.customer || 'Customer') + ' · ' + (s.place || '');
+  const linkBox = document.getElementById('deliveryShareLinkText');
+  const noteEl  = document.getElementById('deliveryShareNote');
+
+  _deliveryDataUri = generateDeliveryLink(s);
+
+  document.getElementById('deliveryShareCustomer').textContent =
+    (s.customer || 'Customer') + ' · ' + (s.place || '');
+
+  // Show a clean preview — the link is now a proper https:// URL
+  linkBox.textContent = _deliveryDataUri;
+  linkBox.style.color      = '';
+  linkBox.style.fontFamily = '';
+  linkBox.style.fontSize   = '';
+
+  if (noteEl) {
+    noteEl.style.display = '';
+    noteEl.innerHTML =
+      '<strong>✓ Hosted link ready.</strong> ' +
+      'Tap <strong>Copy Link</strong> to copy, or <strong>Send via WhatsApp</strong> to share directly. ' +
+      'The delivery person taps it on their phone — works on Android &amp; iPhone with full location tracking.';
+  }
+
   document.getElementById('deliveryShareOverlay').classList.add('open');
-
-  // Generate asynchronously so UI renders first
-  setTimeout(() => {
-    try {
-      _deliveryDataUri = generateDeliveryLink(s);
-
-      // Show a short preview, not the full 50KB data URI
-      linkBox.textContent = '✓ Delivery page ready for ' + (s.customer || 'customer') + ' (' + (s.place || '') + ')';
-      linkBox.style.color = 'var(--green)';
-      linkBox.style.fontFamily = 'inherit';
-      linkBox.style.fontSize   = '13px';
-
-      if (noteEl) {
-        noteEl.style.display = '';
-        noteEl.innerHTML =
-          '<strong>How to share:</strong> Tap <strong>Open Delivery Page</strong> to preview, then use your browser\'s share button — or tap <strong>Send via WhatsApp</strong> to share directly. ' +
-          'The delivery person opens it on their phone; it works without internet and on any device.';
-      }
-    } catch(e) {
-      linkBox.textContent = 'Error generating link: ' + e.message;
-      linkBox.style.color = 'var(--red)';
-    }
-  }, 50);
 }
 
 function closeDeliveryShareModal() {
@@ -4720,14 +4720,13 @@ function _fallbackCopy(text) {
 }
 
 function shareDeliveryOnWhatsApp() {
-  if (!_deliveryDataUri || !_deliverySharingSale) { showToast('Link not ready yet.', true); return; }
+  if (!_deliveryDataUri || !_deliverySharingSale) { showToast('Link not ready.', true); return; }
   const s = _deliverySharingSale;
-  // data: URIs are long — WhatsApp will send as text.
-  // On mobile the recipient taps it and Chrome/browser opens it directly.
   const msg =
-    'Delivery details for *' + (s.customer || 'customer') + '* (' + (s.place || '') + '):\n\n' +
+    'Delivery details for *' + (s.customer || 'customer') + '*' +
+    (s.place ? ' (' + s.place + ')' : '') + ':\n\n' +
     _deliveryDataUri + '\n\n' +
-    '_Tap the link to open your delivery details. Works on any phone browser, no app needed._';
+    '_Tap the link to view delivery address, navigate, and update delivery status._';
   window.open('https://wa.me/?text=' + encodeURIComponent(msg), '_blank');
 }
 
